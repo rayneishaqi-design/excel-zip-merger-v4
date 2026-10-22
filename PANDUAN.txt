@@ -1,0 +1,11 @@
+PROYEK V4 — MENGGABUNGKAN FILE BESAR
+1. Buat repository GitHub baru bernama excel-zip-merger-v4 (atau perbarui hanya repository V3 bila memang diinginkan).
+2. Upload app.py dan requirements.txt ke root repository.
+3. Buat file .streamlit/config.toml di GitHub dan tempel isi file config.toml dari paket ini.
+4. Di Streamlit Community Cloud pilih Deploy public app from GitHub, branch main, file app.py.
+5. Upload file ZIP/Excel/CSV, pilih sheet. Pilih CSV dalam ZIP untuk jutaan baris, atau Excel untuk beberapa sheet otomatis.
+6. Unduh laporan_penggabungan.csv dan periksa total baris per file. Jangan gunakan hasil jika ada error sebelum dicek.
+7. Angka konfigurasi upload 1024 MB tidak menjamin kapasitas server: RAM, disk, timeout, browser, dan batas platform masih berlaku.
+8. CSV bisa dipisah ke bagian 700 ribu baris; setiap bagian mempunyai header. XLSX dibagi otomatis maksimal 1 juta baris data/sheet.
+9. Tidak menghapus duplikat, tidak mengubah nama kolom; jika header berbeda akan dibuat kolom berbeda.
+10. File .xls lama tidak didukung pada versi ini; konversi dulu ke .xlsx.
