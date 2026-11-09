@@ -4,10 +4,6 @@ import os
 import shutil
 import tempfile
 import zipfile
-import importlib.util
-import subprocess
-import sys
-
 from collections import Counter
 from contextlib import closing
 from pathlib import PurePosixPath
@@ -15,40 +11,12 @@ from pathlib import PurePosixPath
 import streamlit as st
 from openpyxl import load_workbook
 import xlsxwriter
-
-
-# =========================================================
-# 1. INSTALASI PDFPLUMBER OTOMATIS
-# =========================================================
-
-if importlib.util.find_spec("pdfplumber") is None:
-    try:
-        subprocess.check_call([
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--quiet",
-            "pdfplumber>=0.11,<1"
-        ])
-    except Exception as exc:
-        raise RuntimeError(
-            "Gagal memasang pdfplumber. Periksa koneksi server."
-        ) from exc
-
 import pdfplumber
-
-if importlib.util.find_spec("reportlab") is None:
-    subprocess.check_call([
-        sys.executable, "-m", "pip", "install", "--quiet",
-        "reportlab>=4,<5"
-    ])
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.utils import simpleSplit
-
 
 # =========================================================
 # 2. KONFIGURASI APLIKASI
