@@ -1,3 +1,4 @@
+
 import csv
 import io
 import os
@@ -78,14 +79,11 @@ EXTS = (".csv", ".xlsx", ".xlsm", ".pdf")
 # =========================================================
 
 def clean_header(vals):
-
     result = []
     seen = Counter()
 
     for i, value in enumerate(vals, 1):
-
         head = str(value).strip() if value is not None else ""
-
         head = head or f"Kolom_{i}"
 
         seen[head] += 1
@@ -99,7 +97,6 @@ def clean_header(vals):
 
 
 def find_header(row):
-
     return any(
         v is not None and str(v).strip()
         for v in row
@@ -107,12 +104,10 @@ def find_header(row):
 
 
 def text_cell(v):
-
     if v is None:
         return ""
 
     if hasattr(v, "isoformat"):
-
         return (
             v.isoformat(sep=" ")
             if hasattr(v, "hour")
@@ -127,9 +122,7 @@ def text_cell(v):
 # =========================================================
 
 def keep_safe_zip(info):
-
     name = info.filename.replace("\\", "/")
-
     parts = PurePosixPath(name).parts
 
     if (
@@ -144,7 +137,6 @@ def keep_safe_zip(info):
 
 
 def copy_to_spool(source, threshold=16 * 1024 * 1024):
-
     f = tempfile.SpooledTemporaryFile(
         max_size=threshold,
         mode="w+b"
@@ -157,42 +149,33 @@ def copy_to_spool(source, threshold=16 * 1024 * 1024):
     )
 
     f.seek(0)
-
     return f
 
 
 def iter_upload_members(uploads):
-
     for uploaded in uploads:
-
         uploaded.seek(0)
 
         if uploaded.name.lower().endswith(".zip"):
-
             with zipfile.ZipFile(uploaded) as outer:
-
                 for info in outer.infolist():
 
                     if not keep_safe_zip(info):
                         continue
 
                     if info.flag_bits & 1:
-
                         raise ValueError(
                             f"ZIP berpassword: {info.filename}"
                         )
 
                     with outer.open(info) as member:
-
                         with copy_to_spool(member) as f:
-
                             yield (
                                 f"{uploaded.name}/{info.filename}",
                                 f
                             )
 
         elif uploaded.name.lower().endswith(EXTS):
-
             yield uploaded.name, uploaded
 
 
@@ -201,27 +184,19 @@ def iter_upload_members(uploads):
 # =========================================================
 
 def csv_rows(source):
-
     source.seek(0)
 
     head = source.read(4096)
-
     source.seek(0)
 
     enc = "utf-8-sig"
 
     for name in ("utf-8-sig", "cp1252", "latin-1"):
-
         try:
-
             head.decode(name, errors="strict")
-
             enc = name
-
             break
-
         except UnicodeDecodeError:
-
             pass
 
     wrapper = io.TextIOWrapper(
@@ -232,29 +207,22 @@ def csv_rows(source):
     )
 
     try:
-
         sample = wrapper.read(16_384)
-
         wrapper.seek(0)
 
         try:
-
             dialect = csv.Sniffer().sniff(
                 sample,
                 delimiters=",;\t|"
             )
-
         except csv.Error:
-
             dialect = csv.excel
 
         yield from csv.reader(wrapper, dialect)
 
     finally:
-
         try:
             wrapper.detach()
-
         except (ValueError, OSError):
             pass
 
@@ -264,11 +232,9 @@ def csv_rows(source):
 # =========================================================
 
 def pdf_rows(source):
-
     source.seek(0)
 
     with pdfplumber.open(source) as pdf:
-
         for page_number, page in enumerate(
             pdf.pages,
             start=1
@@ -284,26 +250,20 @@ def pdf_rows(source):
                 cleaned_rows = []
 
                 for row in table:
-
                     cleaned = [
-
                         " ".join(
                             str(cell)
                             .replace("\n", " ")
                             .split()
                         )
                         if cell is not None else ""
-
                         for cell in row
-
                     ]
 
                     if any(cleaned):
-
                         cleaned_rows.append(cleaned)
 
                 if cleaned_rows:
-
                     sheet_name = (
                         f"Halaman_{page_number}_"
                         f"Tabel_{table_number}"
@@ -327,16 +287,12 @@ def iterate_sheets(
 
     # CSV
     if lower_name.endswith(".csv"):
-
         yield "CSV", csv_rows(source)
-
         return
 
     # PDF
     if lower_name.endswith(".pdf"):
-
         yield from pdf_rows(source)
-
         return
 
     # EXCEL
@@ -351,22 +307,18 @@ def iterate_sheets(
     ) as wb:
 
         if mode == "Sheet pertama":
-
             sheets = wb.worksheets[:1]
 
         elif mode == "Nama sheet tertentu":
-
             sheets = [
                 s for s in wb.worksheets
                 if s.title.lower() == wanted_sheet.lower()
             ]
 
         else:
-
             sheets = wb.worksheets
 
         for ws in sheets:
-
             ws.reset_dimensions()
 
             yield ws.title, ws.iter_rows(
@@ -386,17 +338,12 @@ def scan_columns(
 ):
 
     headers = []
-
     seen = set()
-
     checked = 0
-
     problems = []
 
     for path, handle in iter_upload_members(uploads):
-
         try:
-
             for sheet, rows in iterate_sheets(
                 path,
                 handle,
@@ -404,28 +351,21 @@ def scan_columns(
                 wanted_sheet
             ):
 
-                for first in rows:
+                try:
+                    for first in rows:
+                        if find_header(first):
+                            for col in clean_header(first):
+                                if col not in seen:
+                                    seen.add(col)
+                                    headers.append(col)
 
-                    if find_header(first):
-
-                        for col in clean_header(first):
-
-                            if col not in seen:
-
-                                seen.add(col)
-
-                                headers.append(col)
-
-                        checked += 1
-
-                        break
-
-                if hasattr(rows, "close"):
-
-                    rows.close()
+                            checked += 1
+                            break
+                finally:
+                    if hasattr(rows, "close"):
+                        rows.close()
 
         except Exception as exc:
-
             problems.append([
                 path,
                 "",
@@ -433,11 +373,8 @@ def scan_columns(
             ])
 
     if metadata:
-
         for field in ("__asal_file", "__asal_sheet"):
-
             if field in seen:
-
                 raise ValueError(
                     f"Kolom sumber bernama {field} sudah ada."
                 )
@@ -456,25 +393,16 @@ class OutputWriter:
     def __init__(self, fmt, out_folder, headers):
 
         self.fmt = fmt
-
         self.folder = out_folder
-
         self.headers = headers
-
         self.count = 0
-
         self.part = 0
-
         self.paths = []
-
         self.wb = None
-
         self.worksheet = None
-
         self.file = None
-
         self.writer = None
-
+        self.text = None
         self.local_row = 0
 
         if fmt == "Excel (.xlsx)":
@@ -512,7 +440,8 @@ class OutputWriter:
 
     def next_part(self):
 
-        if self.fmt == "Excel (.xlsx)"):
+        # EXCEL
+        if self.fmt == "Excel (.xlsx)":
 
             self.part += 1
 
@@ -526,9 +455,15 @@ class OutputWriter:
                 self.headers
             )
 
+        # CSV ZIP
         else:
 
             if self.file is not None:
+
+                if self.text is not None:
+                    self.text.flush()
+                    self.text.detach()
+                    self.text = None
 
                 self.file.close()
 
@@ -548,7 +483,6 @@ class OutputWriter:
             )
 
             self.writer = csv.writer(self.text)
-
             self.writer.writerow(self.headers)
 
         self.local_row = 0
@@ -563,24 +497,25 @@ class OutputWriter:
 
         if self.local_row >= cap:
 
-            if self.fmt != "Excel (.xlsx)"):
+            if self.fmt != "Excel (.xlsx)":
 
                 self.text.flush()
-
                 self.text.detach()
+                self.text = None
 
             self.next_part()
 
+        # EXCEL
         if self.fmt == "Excel (.xlsx)"):
 
             for i, v in enumerate(values):
-
                 self.worksheet.write_string(
                     self.local_row + 1,
                     i,
                     text_cell(v)[:32767]
                 )
 
+        # CSV
         else:
 
             self.writer.writerow([
@@ -589,7 +524,6 @@ class OutputWriter:
             ])
 
         self.count += 1
-
         self.local_row += 1
 
     def close(self):
@@ -600,11 +534,13 @@ class OutputWriter:
 
         else:
 
-            self.text.flush()
+            if self.text is not None:
+                self.text.flush()
+                self.text.detach()
+                self.text = None
 
-            self.text.detach()
-
-            self.file.close()
+            if self.file is not None:
+                self.file.close()
 
             self.zf.close()
 
@@ -634,7 +570,6 @@ def merge(
         or (metadata and len(headers) == 2)
         or inspected == 0
     ):
-
         raise ValueError(
             "Tidak ada header/sheet yang terbaca. "
             "Periksa isi file."
@@ -651,7 +586,6 @@ def merge(
     )
 
     total = 0
-
     report = []
 
     try:
@@ -677,9 +611,7 @@ def merge(
                 ):
 
                     found_sheet = True
-
                     count = 0
-
                     it = iter(rows)
 
                     first = next(
@@ -691,14 +623,12 @@ def merge(
                     )
 
                     if first is None:
-
                         report.append([
                             path,
                             sheet,
                             0,
                             "Sheet kosong"
                         ])
-
                         continue
 
                     current_headers = clean_header(first)
@@ -725,24 +655,19 @@ def merge(
                             continue
 
                         values = [
-
                             row[j]
                             if j is not None and j < len(row)
                             else ""
-
                             for j in idx
-
                         ]
 
                         if metadata:
-
                             values = [
                                 path,
                                 sheet
                             ] + values
 
                         output.add(values)
-
                         count += 1
 
                     total += count
@@ -754,8 +679,10 @@ def merge(
                         "OK"
                     ])
 
-                if not found_sheet:
+                    if hasattr(rows, "close"):
+                        rows.close()
 
+                if not found_sheet:
                     errors.append([
                         path,
                         "",
@@ -763,7 +690,6 @@ def merge(
                     ])
 
             except Exception as exc:
-
                 errors.append([
                     path,
                     "",
@@ -813,33 +739,21 @@ def merge(
             w.writerows(errors)
 
         return {
-
             "folder": folder,
-
             "output": output.path,
-
             "report": report_path,
-
             "total": total,
-
             "parts": output.part,
-
             "nerrors": len(errors),
-
             "nfiles": len(report),
-
             "headers": len(headers)
-
         }
 
     except Exception:
 
         try:
-
             output.close()
-
         except Exception:
-
             pass
 
         shutil.rmtree(
