@@ -373,26 +373,58 @@ class OutputWriter:
         self.folder = out_folder
         self.headers = headers
         self.count = 0
-        self.part = 1
+        self.part = 0
         self.local_row = 0
+        self.file = None
+        self.text = None
+        self.writer = None
+        self.wb = None
+        self.worksheet = None
+        self.zf = None
+        self.pdf = None
 
-        self.path = os.path.join(out_folder, "hasil_gabungan.pdf")
-        self.page_width, self.page_height = landscape(A4)
-        self.margin = 24
-        self.bottom_margin = 30
-        self.col_width = (self.page_width - 2 * self.margin) / max(1, len(headers))
+        if fmt == "PDF (.pdf)":
+            self.path = os.path.join(out_folder, "hasil_gabungan.pdf")
+            self.page_width, self.page_height = landscape(A4)
+            self.margin = 24
+            self.bottom_margin = 30
+            self.col_width = (
+                self.page_width - 2 * self.margin
+            ) / max(1, len(headers))
+            n = len(headers)
+            self.font_size = 8 if n <= 5 else 7 if n <= 9 else 6 if n <= 13 else 5
+            self.pdf = canvas.Canvas(
+                self.path,
+                pagesize=landscape(A4),
+                pageCompression=1
+            )
+            self.pdf.setTitle("Hasil Penggabungan Data")
+            self.pdf.setAuthor("Penggabung Data Besar")
+            self.part = 1
+            self.draw_page_header()
 
-        n = len(headers)
-        self.font_size = 8 if n <= 5 else 7 if n <= 9 else 6 if n <= 13 else 5
+        elif fmt == "Excel (.xlsx)":
+            self.path = os.path.join(out_folder, "hasil_gabungan.xlsx")
+            self.wb = xlsxwriter.Workbook(
+                self.path,
+                {
+                    "constant_memory": True,
+                    "strings_to_formulas": False,
+                    "strings_to_urls": False
+                }
+            )
+            self.next_part()
 
-        self.pdf = canvas.Canvas(
-            self.path,
-            pagesize=landscape(A4),
-            pageCompression=1
-        )
-        self.pdf.setTitle("Hasil Penggabungan Data")
-        self.pdf.setAuthor("Penggabung Data Besar")
-        self.draw_page_header()
+        else:
+            self.path = os.path.join(out_folder, "hasil_csv_terbagi.zip")
+            self.zf = zipfile.ZipFile(
+                self.path,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+                compresslevel=1,
+                allowZip64=True
+            )
+            self.next_part()
 
     def safe_text(self, value):
         return text_cell(value).encode(
@@ -406,118 +438,156 @@ class OutputWriter:
             self.page_width, 55,
             fill=1, stroke=0
         )
-
         self.pdf.setFillColor(colors.white)
         self.pdf.setFont("Helvetica-Bold", 14)
         self.pdf.drawString(
             self.margin, self.page_height - 34,
             "HASIL PENGGABUNGAN DATA"
         )
-
         self.pdf.setFont("Helvetica", 7)
         self.pdf.drawRightString(
             self.page_width - self.margin,
             self.page_height - 34,
             f"Halaman {self.part}"
         )
-
         self.y = self.page_height - 75
         self.draw_table_header()
 
     def draw_table_header(self):
         row_height = 25
         y_bottom = self.y - row_height
-
         self.pdf.setFillColor(colors.HexColor("#DCE6F1"))
         self.pdf.rect(
             self.margin, y_bottom,
             self.page_width - 2 * self.margin,
             row_height, fill=1, stroke=0
         )
-
         for i, header in enumerate(self.headers):
             x = self.margin + i * self.col_width
-
             self.pdf.setStrokeColor(colors.HexColor("#8A9AAF"))
             self.pdf.rect(
                 x, y_bottom, self.col_width,
                 row_height, fill=0, stroke=1
             )
-
             self.pdf.setFillColor(colors.HexColor("#17365D"))
             self.pdf.setFont("Helvetica-Bold", self.font_size)
-
             lines = simpleSplit(
                 self.safe_text(header),
                 "Helvetica-Bold",
                 self.font_size,
                 self.col_width - 6
             )
-
             line_y = self.y - 10
             for line in lines[:2]:
                 self.pdf.drawString(x + 3, line_y, line)
                 line_y -= self.font_size + 1
-
         self.y = y_bottom
+
+    def next_part(self):
+        if self.fmt == "Excel (.xlsx)":
+            self.part += 1
+            self.worksheet = self.wb.add_worksheet(f"Data_{self.part}")
+            self.worksheet.write_row(0, 0, self.headers)
+            self.local_row = 0
+        else:
+            if self.file is not None:
+                if self.text is not None:
+                    self.text.flush()
+                    self.text.detach()
+                    self.text = None
+                self.file.close()
+            self.part += 1
+            self.file = self.zf.open(
+                f"gabungan_part_{self.part:03}.csv",
+                "w",
+                force_zip64=True
+            )
+            self.text = io.TextIOWrapper(
+                self.file,
+                encoding="utf-8-sig",
+                newline="",
+                write_through=True
+            )
+            self.writer = csv.writer(self.text)
+            self.writer.writerow(self.headers)
+            self.local_row = 0
 
     def add(self, values):
-        wrapped = []
+        if self.fmt == "PDF (.pdf)":
+            wrapped = []
+            for value in values:
+                lines = simpleSplit(
+                    self.safe_text(value),
+                    "Helvetica",
+                    self.font_size,
+                    max(10, self.col_width - 6)
+                )
+                wrapped.append(lines or [""])
 
-        for value in values:
-            lines = simpleSplit(
-                self.safe_text(value),
-                "Helvetica",
-                self.font_size,
-                max(10, self.col_width - 6)
-            )
-            wrapped.append(lines or [""])
+            max_lines = max(1, max(len(v) for v in wrapped))
+            line_height = self.font_size + 2
+            row_height = max(19, max_lines * line_height + 6)
 
-        max_lines = max(1, max(len(v) for v in wrapped))
-        line_height = self.font_size + 2
-        row_height = max(19, max_lines * line_height + 6)
+            if self.y - row_height < self.bottom_margin:
+                self.pdf.showPage()
+                self.part += 1
+                self.draw_page_header()
 
-        if self.y - row_height < self.bottom_margin:
-            self.pdf.showPage()
-            self.part += 1
-            self.draw_page_header()
-
-        y_bottom = self.y - row_height
-
-        for i, lines in enumerate(wrapped):
-            x = self.margin + i * self.col_width
-
-            if self.count % 2 == 1:
-                self.pdf.setFillColor(colors.HexColor("#F5F7FA"))
+            y_bottom = self.y - row_height
+            for i, lines in enumerate(wrapped):
+                x = self.margin + i * self.col_width
+                if self.count % 2 == 1:
+                    self.pdf.setFillColor(colors.HexColor("#F5F7FA"))
+                    self.pdf.rect(
+                        x, y_bottom, self.col_width,
+                        row_height, fill=1, stroke=0
+                    )
+                self.pdf.setStrokeColor(colors.HexColor("#B7C2D0"))
                 self.pdf.rect(
                     x, y_bottom, self.col_width,
-                    row_height, fill=1, stroke=0
+                    row_height, fill=0, stroke=1
+                )
+                self.pdf.setFillColor(colors.HexColor("#202A35"))
+                self.pdf.setFont("Helvetica", self.font_size)
+                line_y = self.y - line_height - 3
+                for line in lines:
+                    if line_y < y_bottom + 2:
+                        break
+                    self.pdf.drawString(x + 3, line_y, line)
+                    line_y -= line_height
+            self.y = y_bottom
+
+        elif self.fmt == "Excel (.xlsx)":
+            if self.local_row >= MAX_XLSX_ROWS:
+                self.next_part()
+            for i, value in enumerate(values):
+                self.worksheet.write_string(
+                    self.local_row + 1,
+                    i,
+                    text_cell(value)[:32767]
                 )
 
-            self.pdf.setStrokeColor(colors.HexColor("#B7C2D0"))
-            self.pdf.rect(
-                x, y_bottom, self.col_width,
-                row_height, fill=0, stroke=1
-            )
+        else:
+            if self.local_row >= MAX_CSV_ROWS:
+                self.next_part()
+            self.writer.writerow([text_cell(v) for v in values])
 
-            self.pdf.setFillColor(colors.HexColor("#202A35"))
-            self.pdf.setFont("Helvetica", self.font_size)
-
-            line_y = self.y - line_height - 3
-            for line in lines:
-                if line_y < y_bottom + 2:
-                    break
-                self.pdf.drawString(x + 3, line_y, line)
-                line_y -= line_height
-
-        self.y = y_bottom
         self.count += 1
         self.local_row += 1
 
     def close(self):
-        self.pdf.save()
-
-
+        if self.fmt == "PDF (.pdf)":
+            self.pdf.save()
+        elif self.fmt == "Excel (.xlsx)":
+            self.wb.close()
+        else:
+            if self.text is not None:
+                self.text.flush()
+                self.text.detach()
+                self.text = None
+            if self.file is not None:
+                self.file.close()
+            self.zf.close()
 # 10. PROSES PENGGABUNGAN
 # =========================================================
 
@@ -785,11 +855,11 @@ metadata = st.checkbox(
     value=True
 )
 
-fmt = "PDF (.pdf)"
-
-st.info(
-    "Format hasil akhir: PDF. Semua data yang terbaca "
-    "akan digabungkan menjadi satu dokumen PDF."
+fmt = st.radio(
+    "Pilih format hasil akhir",
+    ["PDF (.pdf)", "CSV terpecah dalam ZIP", "Excel (.xlsx)"],
+    horizontal=True,
+    help="Pilih PDF untuk satu dokumen, CSV ZIP untuk data besar, atau Excel untuk spreadsheet."
 )
 
 
@@ -819,7 +889,11 @@ if st.button(
             "Memproses file secara bertahap..."
         ):
 
-            choice = "PDF (.pdf)"
+            choice = (
+                "PDF (.pdf)" if fmt == "PDF (.pdf)"
+                else "Excel (.xlsx)" if fmt == "Excel (.xlsx)"
+                else "CSV"
+            )
 
             result = merge(
                 files,
@@ -894,7 +968,13 @@ if "last" in st.session_state:
                     data["output"]
                 ),
 
-                mime="application/pdf"
+                mime=(
+                    "application/pdf"
+                    if data["output"].lower().endswith(".pdf")
+                    else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    if data["output"].lower().endswith(".xlsx")
+                    else "application/zip"
+                )
             )
 
     with open(data["report"], "rb") as f:
@@ -910,6 +990,6 @@ if "last" in st.session_state:
         )
 
     st.caption(
-        "Hasil utama tersedia dalam format PDF. "
+        "Hasil utama mengikuti format yang dipilih: PDF, CSV ZIP, atau Excel. "
         "Laporan pemeriksaan file dapat diunduh secara terpisah."
     )
