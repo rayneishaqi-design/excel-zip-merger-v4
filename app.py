@@ -1,4 +1,3 @@
-
 import csv
 import io
 import os
@@ -506,7 +505,7 @@ class OutputWriter:
             self.next_part()
 
         # EXCEL
-        if self.fmt == "Excel (.xlsx)"):
+        if self.fmt == "Excel (.xlsx)":
 
             for i, v in enumerate(values):
                 self.worksheet.write_string(
@@ -528,7 +527,7 @@ class OutputWriter:
 
     def close(self):
 
-        if self.fmt == "Excel (.xlsx)"):
+        if self.fmt == "Excel (.xlsx)":
 
             self.wb.close()
 
