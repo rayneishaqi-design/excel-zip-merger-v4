@@ -38,6 +38,17 @@ if importlib.util.find_spec("pdfplumber") is None:
 
 import pdfplumber
 
+if importlib.util.find_spec("reportlab") is None:
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install", "--quiet",
+        "reportlab>=4,<5"
+    ])
+
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib import colors
+from reportlab.lib.utils import simpleSplit
+
 
 # =========================================================
 # 2. KONFIGURASI APLIKASI
@@ -62,8 +73,8 @@ st.warning(
 )
 
 st.caption(
-    "Hasil CSV dipotong menjadi bagian maksimal 700.000 baris. "
-    "Hasil XLSX otomatis dibagi menjadi beberapa sheet."
+    "Hasil penggabungan dibuat menjadi satu PDF dan otomatis "
+    "berlanjut ke halaman berikutnya jika data banyak."
 )
 
 
@@ -390,161 +401,155 @@ def scan_columns(
 class OutputWriter:
 
     def __init__(self, fmt, out_folder, headers):
-
         self.fmt = fmt
         self.folder = out_folder
         self.headers = headers
         self.count = 0
-        self.part = 0
-        self.paths = []
-        self.wb = None
-        self.worksheet = None
-        self.file = None
-        self.writer = None
-        self.text = None
+        self.part = 1
         self.local_row = 0
 
-        if fmt == "Excel (.xlsx)":
+        self.path = os.path.join(out_folder, "hasil_gabungan.pdf")
+        self.page_width, self.page_height = landscape(A4)
+        self.margin = 24
+        self.bottom_margin = 30
+        self.col_width = (self.page_width - 2 * self.margin) / max(1, len(headers))
 
-            self.path = os.path.join(
-                out_folder,
-                "hasil_gabungan.xlsx"
-            )
+        n = len(headers)
+        self.font_size = 8 if n <= 5 else 7 if n <= 9 else 6 if n <= 13 else 5
 
-            self.wb = xlsxwriter.Workbook(
-                self.path,
-                {
-                    "constant_memory": True,
-                    "strings_to_formulas": False,
-                    "strings_to_urls": False
-                }
-            )
+        self.pdf = canvas.Canvas(
+            self.path,
+            pagesize=landscape(A4),
+            pageCompression=1
+        )
+        self.pdf.setTitle("Hasil Penggabungan Data")
+        self.pdf.setAuthor("Penggabung Data Besar")
+        self.draw_page_header()
 
-        else:
+    def safe_text(self, value):
+        return text_cell(value).encode(
+            "latin-1", errors="replace"
+        ).decode("latin-1")
 
-            self.path = os.path.join(
-                out_folder,
-                "hasil_csv_terbagi.zip"
-            )
-
-            self.zf = zipfile.ZipFile(
-                self.path,
-                "w",
-                compression=zipfile.ZIP_DEFLATED,
-                compresslevel=1,
-                allowZip64=True
-            )
-
-        self.next_part()
-
-    def next_part(self):
-
-        # EXCEL
-        if self.fmt == "Excel (.xlsx)":
-
-            self.part += 1
-
-            self.worksheet = self.wb.add_worksheet(
-                f"Data_{self.part}"
-            )
-
-            self.worksheet.write_row(
-                0,
-                0,
-                self.headers
-            )
-
-        # CSV ZIP
-        else:
-
-            if self.file is not None:
-
-                if self.text is not None:
-                    self.text.flush()
-                    self.text.detach()
-                    self.text = None
-
-                self.file.close()
-
-            self.part += 1
-
-            self.file = self.zf.open(
-                f"gabungan_part_{self.part:03}.csv",
-                "w",
-                force_zip64=True
-            )
-
-            self.text = io.TextIOWrapper(
-                self.file,
-                encoding="utf-8-sig",
-                newline="",
-                write_through=True
-            )
-
-            self.writer = csv.writer(self.text)
-            self.writer.writerow(self.headers)
-
-        self.local_row = 0
-
-    def add(self, values):
-
-        cap = (
-            MAX_XLSX_ROWS
-            if self.fmt == "Excel (.xlsx)"
-            else MAX_CSV_ROWS
+    def draw_page_header(self):
+        self.pdf.setFillColor(colors.HexColor("#17365D"))
+        self.pdf.rect(
+            0, self.page_height - 55,
+            self.page_width, 55,
+            fill=1, stroke=0
         )
 
-        if self.local_row >= cap:
+        self.pdf.setFillColor(colors.white)
+        self.pdf.setFont("Helvetica-Bold", 14)
+        self.pdf.drawString(
+            self.margin, self.page_height - 34,
+            "HASIL PENGGABUNGAN DATA"
+        )
 
-            if self.fmt != "Excel (.xlsx)":
+        self.pdf.setFont("Helvetica", 7)
+        self.pdf.drawRightString(
+            self.page_width - self.margin,
+            self.page_height - 34,
+            f"Halaman {self.part}"
+        )
 
-                self.text.flush()
-                self.text.detach()
-                self.text = None
+        self.y = self.page_height - 75
+        self.draw_table_header()
 
-            self.next_part()
+    def draw_table_header(self):
+        row_height = 25
+        y_bottom = self.y - row_height
 
-        # EXCEL
-        if self.fmt == "Excel (.xlsx)":
+        self.pdf.setFillColor(colors.HexColor("#DCE6F1"))
+        self.pdf.rect(
+            self.margin, y_bottom,
+            self.page_width - 2 * self.margin,
+            row_height, fill=1, stroke=0
+        )
 
-            for i, v in enumerate(values):
-                self.worksheet.write_string(
-                    self.local_row + 1,
-                    i,
-                    text_cell(v)[:32767]
+        for i, header in enumerate(self.headers):
+            x = self.margin + i * self.col_width
+
+            self.pdf.setStrokeColor(colors.HexColor("#8A9AAF"))
+            self.pdf.rect(
+                x, y_bottom, self.col_width,
+                row_height, fill=0, stroke=1
+            )
+
+            self.pdf.setFillColor(colors.HexColor("#17365D"))
+            self.pdf.setFont("Helvetica-Bold", self.font_size)
+
+            lines = simpleSplit(
+                self.safe_text(header),
+                "Helvetica-Bold",
+                self.font_size,
+                self.col_width - 6
+            )
+
+            line_y = self.y - 10
+            for line in lines[:2]:
+                self.pdf.drawString(x + 3, line_y, line)
+                line_y -= self.font_size + 1
+
+        self.y = y_bottom
+
+    def add(self, values):
+        wrapped = []
+
+        for value in values:
+            lines = simpleSplit(
+                self.safe_text(value),
+                "Helvetica",
+                self.font_size,
+                max(10, self.col_width - 6)
+            )
+            wrapped.append(lines or [""])
+
+        max_lines = max(1, max(len(v) for v in wrapped))
+        line_height = self.font_size + 2
+        row_height = max(19, max_lines * line_height + 6)
+
+        if self.y - row_height < self.bottom_margin:
+            self.pdf.showPage()
+            self.part += 1
+            self.draw_page_header()
+
+        y_bottom = self.y - row_height
+
+        for i, lines in enumerate(wrapped):
+            x = self.margin + i * self.col_width
+
+            if self.count % 2 == 1:
+                self.pdf.setFillColor(colors.HexColor("#F5F7FA"))
+                self.pdf.rect(
+                    x, y_bottom, self.col_width,
+                    row_height, fill=1, stroke=0
                 )
 
-        # CSV
-        else:
+            self.pdf.setStrokeColor(colors.HexColor("#B7C2D0"))
+            self.pdf.rect(
+                x, y_bottom, self.col_width,
+                row_height, fill=0, stroke=1
+            )
 
-            self.writer.writerow([
-                text_cell(v)
-                for v in values
-            ])
+            self.pdf.setFillColor(colors.HexColor("#202A35"))
+            self.pdf.setFont("Helvetica", self.font_size)
 
+            line_y = self.y - line_height - 3
+            for line in lines:
+                if line_y < y_bottom + 2:
+                    break
+                self.pdf.drawString(x + 3, line_y, line)
+                line_y -= line_height
+
+        self.y = y_bottom
         self.count += 1
         self.local_row += 1
 
     def close(self):
-
-        if self.fmt == "Excel (.xlsx)":
-
-            self.wb.close()
-
-        else:
-
-            if self.text is not None:
-                self.text.flush()
-                self.text.detach()
-                self.text = None
-
-            if self.file is not None:
-                self.file.close()
-
-            self.zf.close()
+        self.pdf.save()
 
 
-# =========================================================
 # 10. PROSES PENGGABUNGAN
 # =========================================================
 
@@ -812,17 +817,14 @@ metadata = st.checkbox(
     value=True
 )
 
-fmt = st.radio(
-    "Format hasil",
-    [
-        "CSV terpecah dalam ZIP (disarankan untuk jutaan baris)",
-        "Excel (.xlsx)"
-    ],
-    horizontal=True
+fmt = "PDF (.pdf)"
+
+st.info(
+    "Format hasil akhir: PDF. Semua data yang terbaca "
+    "akan digabungkan menjadi satu dokumen PDF."
 )
 
 
-# =========================================================
 # 12. TOMBOL PENGGABUNGAN
 # =========================================================
 
@@ -849,11 +851,7 @@ if st.button(
             "Memproses file secara bertahap..."
         ):
 
-            choice = (
-                "Excel (.xlsx)"
-                if fmt == "Excel (.xlsx)"
-                else "CSV"
-            )
+            choice = "PDF (.pdf)"
 
             result = merge(
                 files,
@@ -928,12 +926,7 @@ if "last" in st.session_state:
                     data["output"]
                 ),
 
-                mime=(
-                    "application/zip"
-                    if data["output"].endswith(".zip")
-                    else
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                mime="application/pdf"
             )
 
     with open(data["report"], "rb") as f:
@@ -949,8 +942,6 @@ if "last" in st.session_state:
         )
 
     st.caption(
-        "Jika file hasil CSV dibuka langsung dan seluruh isi "
-        "muncul di satu kolom, impor melalui Excel → Data → "
-        "From Text/CSV → delimiter Comma. "
-        "Nomor pesanan/barcode sebaiknya diimpor sebagai Text."
+        "Hasil utama tersedia dalam format PDF. "
+        "Laporan pemeriksaan file dapat diunduh secara terpisah."
     )
